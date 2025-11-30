@@ -41,8 +41,8 @@
     <!-- منطقة عرض هوية المستخدم -->
     <div id="user-info" class="bg-white p-4 rounded-lg shadow-inner mb-6 text-sm flex justify-between items-center">
         <p class="font-medium text-gray-600">هوية المستخدم (للتتبع):</p>
-        <!-- هذا العنصر سيتم تحديثه باسم ثابت في JavaScript -->
-        <p id="user-id-display" class="font-bold text-red-500 truncate max-w-[70%]">جاري التحميل...</p>
+        <!-- سيتم تحديث هذا باسم ثابت في JavaScript -->
+        <p id="user-id-display" class="font-bold text-red-500 truncate max-w-[70%]">السيد أحمد الخولي (Mr Ahmed El-Kholy)</p>
     </div>
 
     <!-- منطقة عرض قائمة المهام -->
@@ -50,7 +50,7 @@
         <!-- سيتم توليد محتوى قائمة التدقيق هنا بواسطة JavaScript -->
         <div id="loading-message" class="text-center text-gray-500 p-8">
             <div class="animate-spin inline-block w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full"></div>
-            <p class="mt-2">جاري تحميل المهام والتحقق من حالة الحفظ...</p>
+            <p class="mt-2">جاري تحميل المهام...</p>
         </div>
     </main>
 
@@ -75,23 +75,9 @@
     </div>
 
 
-    <!-- سكربتات Firebase و JavaScript -->
+    <!-- سكربتات JavaScript (بدون Firebase) -->
     <script type="module">
-        // استيراد مكتبات Firebase
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // تعريف متغيرات الإعداد العامة (المقدمة من البيئة)
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        let db;
-        let auth;
-        let userId = null;
-        let isAuthReady = false;
-
+        
         const checklistElement = document.getElementById('champs-checklist');
         const loadingMessage = document.getElementById('loading-message');
         const userIdDisplay = document.getElementById('user-id-display');
@@ -103,7 +89,7 @@
             document.getElementById('modal-container').classList.remove('hidden');
         }
 
-        // هيكل قائمة CHAMPS (نفس الهيكل في ملف Markdown)
+        // هيكل قائمة CHAMPS (نفس الهيكل السابق)
         const CHAMPS_DATA = [
             {
                 category: "1. النظافة (Cleanliness)",
@@ -171,101 +157,55 @@
             }
         ];
 
-        // تهيئة Firebase والتحقق من التوثيق
-        function initFirebase() {
-            if (!firebaseConfig) {
-                showModal("خطأ", "لم يتم توفير إعدادات Firebase.");
-                return;
-            }
-
-            try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // تسجيل الدخول باستخدام الرمز المخصص أو مجهول
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                    } else if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken).catch(error => {
-                            console.error("Custom token sign-in failed:", error);
-                            signInAnonymously(auth); // محاولة التسجيل كمجهول في حال فشل الرمز
-                        });
-                        return;
-                    } else {
-                        // إذا لم يتوفر رمز، سجل كمجهول
-                        await signInAnonymously(auth);
-                        userId = auth.currentUser.uid;
-                    }
-
-                    if (userId) {
-                        isAuthReady = true;
-                        // *** التعديل هنا: استخدام اسم ثابت بدلاً من هوية المستخدم (userId) ***
-                        userIdDisplay.textContent = "السيد أحمد الخولي (Mr Ahmed El-Kholy)";
-                        // ***************************************************************
-                        
-                        // بعد تهيئة التوثيق، ابدأ بتحميل قائمة التدقيق
-                        loadChecklistData();
-                    }
-                });
-
-            } catch (error) {
-                console.error("Firebase initialization failed:", error);
-                showModal("خطأ في التهيئة", "فشل في تهيئة Firebase. يرجى التحقق من إعدادات التطبيق.");
-            }
-        }
-
         /**
          * يحول التاريخ الحالي إلى مفتاح يوم (YYYY-MM-DD)
-         * ويسمح بتحديد الشفت/الوردية (صباحي/مسائي) إذا لزم الأمر
+         * ويسمح بتحديد الشفت/الوردية (صباحي/مسائي) لحفظ البيانات محلياً.
          */
         function getCurrentShiftKey() {
             const now = new Date();
             const dateStr = now.toISOString().split('T')[0];
-            
-            // تحديد الوردية: افتراضياً، وردية الصباح حتى 4 مساءً
             const hour = now.getHours();
+            // وردية الصباح حتى 4 مساءً، وما بعدها وردية المساء
             const shift = hour < 16 ? 'Morning' : 'Evening'; 
             
-            return `${dateStr}_${shift}`;
+            return `champs_checklist_${dateStr}_${shift}`;
         }
 
-        // دالة لحفظ حالة المهمة إلى Firestore
-        async function saveTaskStatus(categoryIndex, taskIndex, isCompleted) {
-            if (!db || !userId) {
-                // عرض رسالة خطأ، لكن نستمر في محاولة الحفظ باستخدام userId حتى لو لم يتم عرضه في الواجهة
-                console.error("Database or User ID not ready for saving.");
-                return;
-            }
-
-            const shiftKey = getCurrentShiftKey();
-            const checklistPath = `artifacts/${appId}/users/${userId}/champs_checklists/${shiftKey}`;
-            
-            // بناء مسار الحقل في قاعدة البيانات
-            const fieldPath = `status.${categoryIndex}.${taskIndex}`;
-
-            // استخدام setDoc مع دمج لعدم مسح البيانات الأخرى
+        // دالة لاسترجاع حالة قائمة التدقيق من التخزين المحلي
+        function getChecklistState() {
+            const key = getCurrentShiftKey();
+            const savedData = localStorage.getItem(key);
             try {
-                await setDoc(doc(db, checklistPath), {
-                    [fieldPath]: isCompleted,
-                    lastUpdated: serverTimestamp(),
-                    userId: userId,
-                    shiftKey: shiftKey
-                }, { merge: true });
-                console.log(`Task status saved: ${fieldPath} = ${isCompleted}`);
+                return savedData ? JSON.parse(savedData) : {};
             } catch (e) {
-                console.error("Error saving document: ", e);
-                // شو مودال فقط إذا كان الخطأ حقيقي وليس بسبب عدم جاهزية البيانات
-                // showModal("خطأ في الحفظ", "فشل في حفظ حالة المهمة.");
+                console.error("Error parsing localStorage data:", e);
+                return {};
             }
         }
+
+        // دالة لحفظ حالة قائمة التدقيق في التخزين المحلي
+        function saveChecklistState(state) {
+            const key = getCurrentShiftKey();
+            try {
+                localStorage.setItem(key, JSON.stringify(state));
+            } catch (e) {
+                console.error("Error saving to localStorage:", e);
+                showModal("خطأ في الحفظ", "فشل حفظ حالة المهام في المتصفح.");
+            }
+        }
+
 
         // دالة لتهيئة واجهة قائمة التدقيق بناءً على البيانات المحفوظة
         function renderChecklist(savedStatus = {}) {
             checklistElement.innerHTML = '';
+            
+            if (Object.keys(savedStatus).length === 0) {
+                 // إذا لم يتم العثور على حالة سابقة، قم بتهيئة رسالة بسيطة
+                 console.log("No saved checklist state found for this shift.");
+            }
 
             CHAMPS_DATA.forEach((categoryData, catIndex) => {
+                // استخدام حالة الفئة المحفوظة أو كائن فارغ إذا لم توجد
                 const categoryStatus = savedStatus[catIndex] || {};
 
                 const categoryHTML = `
@@ -274,6 +214,7 @@
                         <p class="text-gray-500 mb-4">${categoryData.goal}</p>
                         <ul class="space-y-3">
                             ${categoryData.tasks.map((task, taskIndex) => {
+                                // التحقق من حالة الإنجاز من الـ localStorage
                                 const isCompleted = categoryStatus[taskIndex] === true;
                                 const checkedClass = isCompleted ? 'completed' : 'text-gray-700';
                                 return `
@@ -297,48 +238,46 @@
             loadingMessage.classList.add('hidden');
         }
         
-        // دالة لتحميل البيانات في الوقت الحقيقي
+        // دالة تحميل البيانات (الآن من localStorage)
         function loadChecklistData() {
-            if (!isAuthReady || !userId || !db) return;
-
-            const shiftKey = getCurrentShiftKey();
-            const docRef = doc(db, `artifacts/${appId}/users/${userId}/champs_checklists/${shiftKey}`);
-            
-            // استخدام onSnapshot للحصول على تحديثات في الوقت الحقيقي
-            onSnapshot(docRef, (docSnap) => {
-                let savedStatus = {};
-                if (docSnap.exists()) {
-                    // إذا كان المستند موجوداً، استخرج حالة المهام
-                    savedStatus = docSnap.data().status || {};
-                    console.log("Checklist data loaded from Firestore.");
-                } else {
-                    console.log("No saved checklist for this shift. Starting fresh.");
-                }
-                // قم بتوليد قائمة التدقيق بناءً على البيانات المحفوظة
-                renderChecklist(savedStatus);
-            }, (error) => {
-                console.error("Error listening to document:", error);
-                loadingMessage.innerHTML = `<p class="text-red-500">فشل تحميل البيانات: ${error.message}</p>`;
-                renderChecklist({}); // عرض القائمة فارغة في حالة الفشل
-            });
+            const savedStatus = getChecklistState();
+            renderChecklist(savedStatus);
         }
 
-        // لف الدالة في نافذة لتصبح قابلة للاستدعاء من HTML
+        // دالة حفظ حالة المهمة (الآن في localStorage)
         window.saveTaskStatusWrapper = (catIndex, taskIndex, isCompleted) => {
-            // تحديث فوري للمظهر قبل الحفظ
-            const label = document.querySelector(`label[for="task-${catIndex}-${taskIndex}"]`);
+            const cat = parseInt(catIndex);
+            const task = parseInt(taskIndex);
+            
+            // 1. تحديث المظهر الفوري
+            const label = document.querySelector(`label[for="task-${cat}-${task}"]`);
             if(label) {
                 label.classList.toggle('completed', isCompleted);
             }
-            // ثم الحفظ في Firestore
-            saveTaskStatus(parseInt(catIndex), parseInt(taskIndex), isCompleted);
+            
+            // 2. تحديث الحالة في الذاكرة
+            const savedStatus = getChecklistState();
+            if (!savedStatus[cat]) {
+                savedStatus[cat] = {};
+            }
+            savedStatus[cat][task] = isCompleted;
+            
+            // 3. الحفظ في التخزين المحلي
+            saveChecklistState(savedStatus);
+            console.log(`Task status saved locally: Category ${cat}, Task ${task} = ${isCompleted}`);
         };
 
-        // بدء تهيئة التطبيق عند تحميل الصفحة
-        initFirebase();
+        // بدء تهيئة التطبيق عند تحميل الصفحة (الآن بدون Firebase)
+        function initApp() {
+            // عرض اسم المستخدم الثابت
+            userIdDisplay.textContent = "السيد أحمد الخولي (Mr Ahmed El-Kholy)";
+            // تحميل وعرض قائمة التدقيق من localStorage
+            loadChecklistData();
+        }
+
+        initApp();
 
     </script>
 </body>
 </html>
 
-  
