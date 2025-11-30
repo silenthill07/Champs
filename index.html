@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>قائمة تدقيق CHAMPS اليومية</title>
+    <!-- تحميل خطوط جوجل (Inter) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <!-- تحميل Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --primary-color: #EF4444; /* Red 500 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            text-align: right;
+        }
+        .champs-card {
+            box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s;
+        }
+        .champs-card:hover {
+            transform: translateY(-2px);
+        }
+        .completed {
+            text-decoration: line-through;
+            color: #9ca3af; /* Gray 400 */
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-6">
+
+    <!-- العنوان والهوية -->
+    <header class="text-center mb-8">
+        <h1 class="text-3xl font-extrabold text-gray-800">برنامج CHAMPS</h1>
+        <p class="text-lg text-gray-500">قائمة التدقيق اليومية لتجربة عملاء ممتازة</p>
+    </header>
+
+    <!-- منطقة عرض هوية المستخدم -->
+    <div id="user-info" class="bg-white p-4 rounded-lg shadow-inner mb-6 text-sm flex justify-between items-center">
+        <p class="font-medium text-gray-600">هوية المستخدم (للتتبع):</p>
+        <!-- هذا العنصر سيتم تحديثه باسم ثابت في JavaScript -->
+        <p id="user-id-display" class="font-bold text-red-500 truncate max-w-[70%]">جاري التحميل...</p>
+    </div>
+
+    <!-- منطقة عرض قائمة المهام -->
+    <main id="champs-checklist" class="space-y-8">
+        <!-- سيتم توليد محتوى قائمة التدقيق هنا بواسطة JavaScript -->
+        <div id="loading-message" class="text-center text-gray-500 p-8">
+            <div class="animate-spin inline-block w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full"></div>
+            <p class="mt-2">جاري تحميل المهام والتحقق من حالة الحفظ...</p>
+        </div>
+    </main>
+
+    <!-- حقوق الملكية الفكرية -->
+    <footer class="mt-12 pt-4 border-t border-gray-200 text-center text-xs text-gray-500">
+        <p>حقوق الملكية الفكرية © 2025 أحمد الخولي (Ahmed El-Kholy). جميع الحقوق محفوظة.</p>
+        <p class="mt-1">تم تطوير هذا البرنامج لضمان تطبيق معايير CHAMPS بجودة ودقة عالية.</p>
+    </footer>
+
+    <!-- منطقة الرسائل المنبثقة (Modal) -->
+    <div id="modal-container" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm">
+            <h3 class="text-xl font-bold text-red-600 mb-4" id="modal-title"></h3>
+            <p class="text-gray-700 mb-6" id="modal-message"></p>
+            <div class="flex justify-end">
+                <button onclick="document.getElementById('modal-container').classList.add('hidden')"
+                        class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition duration-150">
+                    حسناً
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- سكربتات Firebase و JavaScript -->
+    <script type="module">
+        // استيراد مكتبات Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // تعريف متغيرات الإعداد العامة (المقدمة من البيئة)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        const checklistElement = document.getElementById('champs-checklist');
+        const loadingMessage = document.getElementById('loading-message');
+        const userIdDisplay = document.getElementById('user-id-display');
+
+        // دالة لعرض رسائل النظام (تستخدم بدلاً من alert)
+        function showModal(title, message) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-container').classList.remove('hidden');
+        }
+
+        // هيكل قائمة CHAMPS (نفس الهيكل في ملف Markdown)
+        const CHAMPS_DATA = [
+            {
+                category: "1. النظافة (Cleanliness)",
+                goal: "الحفاظ على بيئة عمل نظيفة وآمنة ومظهر احترافي.",
+                tasks: [
+                    "تنظيف وتلميع جميع الأسطح في منطقة استقبال العملاء.",
+                    "مسح وتعقيم الطاولات والكراسي فور مغادرة العميل.",
+                    "إزالة الانسكابات والأوساخ فوراً من الأرضية.",
+                    "مسح مناطق التحضير في المطبخ فور الانتهاء من استخدامها.",
+                    "فحص دورات المياه وتسجيل ذلك في نموذج التدقيق كل 60 دقيقة.",
+                    "التأكد من ارتداء الزي الموحد النظيف بالكامل واستخدام قفازات نظيفة.",
+                ]
+            },
+            {
+                category: "2. الضيافة (Hospitality)",
+                goal: "تقديم استقبال دافئ وودود والتركيز على تجاوز توقعات العملاء.",
+                tasks: [
+                    "توجيه التحية للعميل في غضون 30 ثانية من دخوله.",
+                    "استخدام عبارات مثل 'يسعدني خدمتك' واللغة الإيجابية.",
+                    "الاستماع بهدوء للشكاوى وتقديم حل سريع وفعال.",
+                    "شكر العميل وتوجيه دعوة للعودة عند التوديع.",
+                    "الانتباه إلى احتياجات العميل (مثل نقص المشروب) دون أن يطلبها (خدمة استباقية).",
+                ]
+            },
+            {
+                category: "3. الدقة (Accuracy)",
+                goal: "تلبية الطلبات بشكل صحيح وكامل في المرة الأولى.",
+                tasks: [
+                    "تكرار الطلب بصوت واضح للعميل قبل إرساله للمطبخ.",
+                    "فحص تذكرة الطلب والتأكد من تطابق المكونات والملاحظات الخاصة.",
+                    "إجراء فحص سريع (Quick Check) للتأكد من اكتمال الطلب قبل التسليم.",
+                    "وضع علامات واضحة على الطلبات المخصصة 'للتوصيل' أو 'للاستلام'.",
+                ]
+            },
+            {
+                category: "4. الصيانة (Maintenance)",
+                goal: "الحفاظ على جميع المعدات والمرافق في حالة عمل ممتازة.",
+                tasks: [
+                    "فحص درجة حرارة الثلاجات والمجمدات والشوايات في بداية الوردية.",
+                    "الإبلاغ عن أي ضوضاء غير عادية أو ضعف أداء لأي معدة فوراً.",
+                    "استبدال أي مصابيح محترقة أو تلف في الديكورات عند اكتشافه.",
+                    "تنظيف فلاتر الشفط والمراوح في المطبخ.",
+                ]
+            },
+            {
+                category: "5. جودة المنتج (Product Quality)",
+                goal: "ضمان أن كل وجبة تلبي أعلى معايير الجودة والطعم والمواصفات.",
+                tasks: [
+                    "فحص جودة المكونات الخام قبل البدء بالتحضير.",
+                    "الالتزام الصارم بوصفات المطعم المعتمدة والقياسات المحددة.",
+                    "استخدام مقياس حرارة الغذاء للتأكد من وصول المنتج إلى درجة الحرارة الآمنة.",
+                    "التأكد من أن الوجبة موضوعة في الطبق بشكل جذاب (Presentation).",
+                    "الالتزام بفترات الاحتفاظ بالمنتج (Holding Time) والتخلص من ما يتجاوزها.",
+                ]
+            },
+            {
+                category: "6. سرعة الخدمة (Speed of Service)",
+                goal: "تقديم الطلب للعميل في أسرع وقت ممكن مع الحفاظ على الجودة والدقة.",
+                tasks: [
+                    "تحديد وقت مستهدف لكل طلب وتتبع الالتزام به.",
+                    "تنظيم أماكن العمل (Mise en Place) لتقليل الحركة غير الضرورية.",
+                    "توزيع المهام بوضوح بين الموظفين لتجنب الازدواجية.",
+                    "تجهيز المكونات مسبقاً (Prep Work) بكميات كافية قبل الذروة.",
+                ]
+            }
+        ];
+
+        // تهيئة Firebase والتحقق من التوثيق
+        function initFirebase() {
+            if (!firebaseConfig) {
+                showModal("خطأ", "لم يتم توفير إعدادات Firebase.");
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // تسجيل الدخول باستخدام الرمز المخصص أو مجهول
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken).catch(error => {
+                            console.error("Custom token sign-in failed:", error);
+                            signInAnonymously(auth); // محاولة التسجيل كمجهول في حال فشل الرمز
+                        });
+                        return;
+                    } else {
+                        // إذا لم يتوفر رمز، سجل كمجهول
+                        await signInAnonymously(auth);
+                        userId = auth.currentUser.uid;
+                    }
+
+                    if (userId) {
+                        isAuthReady = true;
+                        // *** التعديل هنا: استخدام اسم ثابت بدلاً من هوية المستخدم (userId) ***
+                        userIdDisplay.textContent = "السيد أحمد الخولي (Mr Ahmed El-Kholy)";
+                        // ***************************************************************
+                        
+                        // بعد تهيئة التوثيق، ابدأ بتحميل قائمة التدقيق
+                        loadChecklistData();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                showModal("خطأ في التهيئة", "فشل في تهيئة Firebase. يرجى التحقق من إعدادات التطبيق.");
+            }
+        }
+
+        /**
+         * يحول التاريخ الحالي إلى مفتاح يوم (YYYY-MM-DD)
+         * ويسمح بتحديد الشفت/الوردية (صباحي/مسائي) إذا لزم الأمر
+         */
+        function getCurrentShiftKey() {
+            const now = new Date();
+            const dateStr = now.toISOString().split('T')[0];
+            
+            // تحديد الوردية: افتراضياً، وردية الصباح حتى 4 مساءً
+            const hour = now.getHours();
+            const shift = hour < 16 ? 'Morning' : 'Evening'; 
+            
+            return `${dateStr}_${shift}`;
+        }
+
+        // دالة لحفظ حالة المهمة إلى Firestore
+        async function saveTaskStatus(categoryIndex, taskIndex, isCompleted) {
+            if (!db || !userId) {
+                // عرض رسالة خطأ، لكن نستمر في محاولة الحفظ باستخدام userId حتى لو لم يتم عرضه في الواجهة
+                console.error("Database or User ID not ready for saving.");
+                return;
+            }
+
+            const shiftKey = getCurrentShiftKey();
+            const checklistPath = `artifacts/${appId}/users/${userId}/champs_checklists/${shiftKey}`;
+            
+            // بناء مسار الحقل في قاعدة البيانات
+            const fieldPath = `status.${categoryIndex}.${taskIndex}`;
+
+            // استخدام setDoc مع دمج لعدم مسح البيانات الأخرى
+            try {
+                await setDoc(doc(db, checklistPath), {
+                    [fieldPath]: isCompleted,
+                    lastUpdated: serverTimestamp(),
+                    userId: userId,
+                    shiftKey: shiftKey
+                }, { merge: true });
+                console.log(`Task status saved: ${fieldPath} = ${isCompleted}`);
+            } catch (e) {
+                console.error("Error saving document: ", e);
+                // شو مودال فقط إذا كان الخطأ حقيقي وليس بسبب عدم جاهزية البيانات
+                // showModal("خطأ في الحفظ", "فشل في حفظ حالة المهمة.");
+            }
+        }
+
+        // دالة لتهيئة واجهة قائمة التدقيق بناءً على البيانات المحفوظة
+        function renderChecklist(savedStatus = {}) {
+            checklistElement.innerHTML = '';
+
+            CHAMPS_DATA.forEach((categoryData, catIndex) => {
+                const categoryStatus = savedStatus[catIndex] || {};
+
+                const categoryHTML = `
+                    <section class="champs-card bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-500">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">${categoryData.category}</h2>
+                        <p class="text-gray-500 mb-4">${categoryData.goal}</p>
+                        <ul class="space-y-3">
+                            ${categoryData.tasks.map((task, taskIndex) => {
+                                const isCompleted = categoryStatus[taskIndex] === true;
+                                const checkedClass = isCompleted ? 'completed' : 'text-gray-700';
+                                return `
+                                    <li class="flex items-start">
+                                        <input type="checkbox" id="task-${catIndex}-${taskIndex}" 
+                                            data-cat-index="${catIndex}" data-task-index="${taskIndex}"
+                                            ${isCompleted ? 'checked' : ''} 
+                                            class="mt-1 h-5 w-5 text-red-600 border-gray-300 rounded focus:ring-red-500 cursor-pointer flex-shrink-0"
+                                            onchange="window.saveTaskStatusWrapper(this.dataset.catIndex, this.dataset.taskIndex, this.checked)">
+                                        <label for="task-${catIndex}-${taskIndex}" class="mr-3 text-base font-medium leading-relaxed cursor-pointer ${checkedClass}">
+                                            ${task}
+                                        </label>
+                                    </li>
+                                `;
+                            }).join('')}
+                        </ul>
+                    </section>
+                `;
+                checklistElement.insertAdjacentHTML('beforeend', categoryHTML);
+            });
+            loadingMessage.classList.add('hidden');
+        }
+        
+        // دالة لتحميل البيانات في الوقت الحقيقي
+        function loadChecklistData() {
+            if (!isAuthReady || !userId || !db) return;
+
+            const shiftKey = getCurrentShiftKey();
+            const docRef = doc(db, `artifacts/${appId}/users/${userId}/champs_checklists/${shiftKey}`);
+            
+            // استخدام onSnapshot للحصول على تحديثات في الوقت الحقيقي
+            onSnapshot(docRef, (docSnap) => {
+                let savedStatus = {};
+                if (docSnap.exists()) {
+                    // إذا كان المستند موجوداً، استخرج حالة المهام
+                    savedStatus = docSnap.data().status || {};
+                    console.log("Checklist data loaded from Firestore.");
+                } else {
+                    console.log("No saved checklist for this shift. Starting fresh.");
+                }
+                // قم بتوليد قائمة التدقيق بناءً على البيانات المحفوظة
+                renderChecklist(savedStatus);
+            }, (error) => {
+                console.error("Error listening to document:", error);
+                loadingMessage.innerHTML = `<p class="text-red-500">فشل تحميل البيانات: ${error.message}</p>`;
+                renderChecklist({}); // عرض القائمة فارغة في حالة الفشل
+            });
+        }
+
+        // لف الدالة في نافذة لتصبح قابلة للاستدعاء من HTML
+        window.saveTaskStatusWrapper = (catIndex, taskIndex, isCompleted) => {
+            // تحديث فوري للمظهر قبل الحفظ
+            const label = document.querySelector(`label[for="task-${catIndex}-${taskIndex}"]`);
+            if(label) {
+                label.classList.toggle('completed', isCompleted);
+            }
+            // ثم الحفظ في Firestore
+            saveTaskStatus(parseInt(catIndex), parseInt(taskIndex), isCompleted);
+        };
+
+        // بدء تهيئة التطبيق عند تحميل الصفحة
+        initFirebase();
+
+    </script>
+</body>
+</html>
+
+  
